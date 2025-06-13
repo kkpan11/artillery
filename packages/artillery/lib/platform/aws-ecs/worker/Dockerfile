@@ -2,7 +2,7 @@
 # NOTE: Version we use here needs to be kept consistent with that in
 # artillery-engine-playwright.
 # ********************************
-FROM mcr.microsoft.com/playwright:v1.52.0
+FROM mcr.microsoft.com/playwright:v1.53.0
 
 ARG TARGETARCH
 
@@ -54,6 +54,7 @@ RUN npm install -w artillery --ignore-scripts --omit=dev
 RUN npm install aws-lambda-ric
 
 RUN npm cache clean --force \
+    && rm ./package.json \
     && rm -rf /root/.cache \
     && ln -s /artillery/node_modules/.bin/artillery /usr/local/bin/artillery \
     && rm -rf /ms-playwright/firefox* \
@@ -63,4 +64,3 @@ RUN npm cache clean --force \
 RUN chmod +x /artillery/loadgen-worker
 
 ENTRYPOINT ["/artillery/packages/artillery/bin/run"]
-

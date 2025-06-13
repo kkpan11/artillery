@@ -16,7 +16,7 @@ const util = require('../aws-ecs/legacy/util');
 const generateId = require('../../util/generate-id');
 const EventEmitter = require('eventemitter3');
 const debug = require('debug')('platform:azure-aci');
-const { IMAGE_VERSION } = require('../aws-ecs/legacy/constants');
+const { IMAGE_VERSION, WAIT_TIMEOUT } = require('../aws-ecs/legacy/constants');
 const { regionNames } = require('./regions');
 const path = require('path');
 const { Timeout, sleep } = require('../aws-ecs/legacy/time');
@@ -44,11 +44,8 @@ class PlatformAzureACI {
     this.azureSubscriptionId =
       process.env.AZURE_SUBSCRIPTION_ID ||
       platformOpts.platformConfig['subscription-id'];
-    this.azureClientId =
-      process.env.AZURE_CLIENT_ID || platformOpts.platformConfig['client-id'];
-    this.azureClientSecret =
-      process.env.AZURE_CLIENT_SECRET ||
-      platformOpts.platformConfig['client-secret'];
+    this.azureClientId = process.env.AZURE_CLIENT_ID;
+    this.azureClientSecret = process.env.AZURE_CLIENT_SECRET;
 
     this.storageAccount =
       process.env.AZURE_STORAGE_ACCOUNT ||
@@ -216,8 +213,13 @@ class PlatformAzureACI {
     )[0];
     this.artilleryArgs.push(p.noPrefixPosix);
 
+    const poolSize =
+      typeof process.env.CONSUMER_POOL_SIZE !== 'undefined'
+        ? parseInt(process.env.CONSUMER_POOL_SIZE, 10)
+        : Math.max(Math.ceil(this.count / 25), 5);
+
     const consumer = new QueueConsumer(
-      { poolSize: Infinity },
+      { poolSize },
       {
         queueUrl: process.env.AZURE_STORAGE_QUEUE_URL || this.queueUrl,
         handleMessage: async (message) => {
@@ -297,7 +299,6 @@ class PlatformAzureACI {
       console.error(err);
     });
 
-    consumer.start();
     this.queueConsumer = consumer;
 
     const metadata = {
@@ -334,7 +335,7 @@ class PlatformAzureACI {
         const delayMs =
           Math.floor(
             Math.random() *
-              parseInt(process.env.AZURE_LAUNCH_STAGGER_SEC || '10', 10)
+              parseInt(process.env.AZURE_LAUNCH_STAGGER_SEC || '5', 10)
           ) * 1000;
         await sleep(delayMs);
       }
@@ -348,7 +349,7 @@ class PlatformAzureACI {
       this.azureSubscriptionId
     );
 
-    const provisioningWaitTimeout = new Timeout(5 * 60 * 1000).start();
+    const provisioningWaitTimeout = new Timeout(WAIT_TIMEOUT * 1000).start();
 
     let containerGroupsInTestRun = [];
     while (true) {
@@ -391,6 +392,7 @@ class PlatformAzureACI {
       console.log(
         'Container instances have been created. Waiting for workers to start...'
       );
+      await this.queueConsumer.start();
     } else {
       console.log('Some containers instances failed to provision');
       console.log('Please see the Azure console for details');
@@ -558,6 +560,8 @@ class PlatformAzureACI {
             util.btoa(JSON.stringify(this.artilleryArgs)),
             '-i',
             this.testRunId,
+            '-t',
+            String(WAIT_TIMEOUT),
             '-d',
             'NOT_USED_ON_AZURE',
             '-r',
